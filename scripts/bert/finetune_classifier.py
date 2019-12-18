@@ -39,6 +39,7 @@ import argparse
 import random
 import logging
 import warnings
+import sys
 from datetime import datetime as dt
 import numpy as np
 import mxnet as mx
@@ -52,6 +53,7 @@ from data.classification import MRPCTask, QQPTask, RTETask, STSBTask, SSTTask
 from data.classification import QNLITask, CoLATask, MNLITask, WNLITask, XNLITask
 from data.classification import LCQMCTask, ChnSentiCorpTask
 from data.transform import BERTDatasetTransform
+import git_tag
 
 nlp.utils.check_version('0.8.1', warning_only=True)
 
@@ -70,11 +72,9 @@ tasks = {
     'ChnSentiCorp': ChnSentiCorpTask()
 }
 
-def output_dir_string(args):
+def output_dir_string(args,_datetime):
     model_name = args.bert_model
-    now = dt.now()
-    time_str = now.strftime('%Y-%m-%d_%H.%M.%S')
-    retval = f"logs/{time_str}_{model_name}"
+    retval = f"logs/{_datetime}_{model_name}"
     return retval
 
 parser = argparse.ArgumentParser(
@@ -188,9 +188,19 @@ parser.add_argument(
          'The provided value is the patience. ')
 
 args = parser.parse_args()
+_datetime = git_tag.get_current_datetime()
 output_dir = args.output_dir
 if output_dir is None:
-    output_dir = output_dir_string(args)
+    output_dir = output_dir_string(args, _datetime)
+
+git_status = git_tag.check_git_status()
+if not git_status:
+    sys.exit(1)
+
+commit_err = git_tag.commit_git_tag(output_dir.split('/')[-1])
+if commit_err is not 0:
+    sys.exit(commit_err)
+
 nlp.utils.mkdir("logs")
 nlp.utils.mkdir(output_dir)
 
@@ -249,6 +259,7 @@ get_pretrained = not (pretrained_bert_parameters is not None
 downsample = [None]*24
 downsample[8] = 2
 downsample[16] = 2
+logging.info(f'downsample: {downsample}')
 
 use_roberta = 'roberta' in model_name
 get_model_params = {
