@@ -249,8 +249,6 @@ class BERTEncoder(HybridBlock, Seq2SeqEncoder):
             outputs = F.SequenceMask(outputs, sequence_length=curr_valid_length,
                                      use_sequence_length=True, axis=1)
 
-        import pdb; pdb.set_trace()
-
         if self._output_all_encodings:
             return all_encodings_outputs, additional_outputs
         return outputs, additional_outputs
