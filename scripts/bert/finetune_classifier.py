@@ -181,9 +181,12 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-logging.getLogger().setLevel(logging.INFO)
 logging.captureWarnings(True)
-logging.info(args)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                    datefmt='%m/%d/%Y %H:%M:%S',
+                    level=logging.INFO)
+logger = logging.getLogger(__name__)
+logger.info(args)
 
 batch_size = args.batch_size
 dev_batch_size = args.dev_batch_size
@@ -193,7 +196,7 @@ epsilon = args.epsilon
 accumulate = args.accumulate
 log_interval = args.log_interval * accumulate if accumulate else args.log_interval
 if accumulate:
-    logging.info('Using gradient accumulation. Effective batch size = ' \
+    logger.debug('Using gradient accumulation. Effective batch size = ' \
                  'batch_size * accumulate = %d', accumulate * batch_size)
 
 # random seed
@@ -272,15 +275,15 @@ if not model_parameters:
 # load checkpointing
 output_dir = args.output_dir
 if pretrained_bert_parameters:
-    logging.info('loading bert params from %s', pretrained_bert_parameters)
+    logger.info('loading bert params from %s', pretrained_bert_parameters)
     nlp.utils.load_parameters(model.bert, pretrained_bert_parameters, ctx=ctx,
                               ignore_extra=True, cast_dtype=True)
 if model_parameters:
-    logging.info('loading model params from %s', model_parameters)
+    logger.info('loading model params from %s', model_parameters)
     nlp.utils.load_parameters(model, model_parameters, ctx=ctx, cast_dtype=True)
 nlp.utils.mkdir(output_dir)
 
-logging.debug(model)
+logger.debug(model)
 #model.hybridize(static_alloc=True)
 loss_function.hybridize(static_alloc=True)
 
@@ -370,14 +373,14 @@ def preprocess_data(tokenizer, task, batch_size, dev_batch_size, max_len, vocab,
 
 
 # Get the loader.
-logging.info('processing dataset...')
+logger.info('processing dataset...')
 train_data, dev_data_list, test_data_list, num_train_examples = preprocess_data(
     bert_tokenizer, task, batch_size, dev_batch_size, args.max_len, vocabulary, args.pad)
 
 
 def test(loader_test, segment):
     """Inference function on the test dataset."""
-    logging.info('Now we are doing testing on %s with %s.', segment, ctx)
+    logger.info('Now we are doing testing on %s with %s.', segment, ctx)
 
     tic = time.time()
     results = []
@@ -401,7 +404,7 @@ def test(loader_test, segment):
 
     mx.nd.waitall()
     toc = time.time()
-    logging.info('Time cost=%.2fs, throughput=%.2f samples/s', toc - tic,
+    logger.info('Time cost=%.2fs, throughput=%.2f samples/s', toc - tic,
                  dev_batch_size * len(loader_test) / (toc - tic))
     # write result to a file.
     segment = segment.replace('_mismatched', '-mm')
@@ -423,7 +426,7 @@ def log_train(batch_id, batch_num, metric, step_loss, log_interval, epoch_id, le
 
     train_str = '[Epoch %d Batch %d/%d] loss=%.4f, lr=%.7f, metrics:' + \
                 ','.join([i + ':%.4f' for i in metric_nm])
-    logging.info(train_str, epoch_id + 1, batch_id + 1, batch_num,
+    logger.info(train_str, epoch_id + 1, batch_id + 1, batch_num,
                  step_loss / log_interval, learning_rate, *metric_val)
 
 
@@ -435,14 +438,14 @@ def log_eval(batch_id, batch_num, metric, step_loss, log_interval):
 
     eval_str = '[Batch %d/%d] loss=%.4f, metrics:' + \
                ','.join([i + ':%.4f' for i in metric_nm])
-    logging.info(eval_str, batch_id + 1, batch_num,
+    logger.info(eval_str, batch_id + 1, batch_num,
                  step_loss / log_interval, *metric_val)
 
 
 def train(metric):
     """Training function."""
     if not only_inference:
-        logging.info('Now we are doing BERT classification training on %s!', ctx)
+        logger.info('Now we are doing BERT classification training on %s!', ctx)
 
     all_model_params = model.collect_params()
     optimizer_params = {'learning_rate': lr, 'epsilon': epsilon, 'wd': 0.01}
@@ -475,7 +478,7 @@ def train(metric):
     tic = time.time()
     for epoch_id in range(args.epochs):
         if args.early_stop and patience == 0:
-            logging.info('Early stopping at epoch %d', epoch_id)
+            logger.info('Early stopping at epoch %d', epoch_id)
             break
         if not only_inference:
             metric.reset()
@@ -545,9 +548,9 @@ def train(metric):
             params_saved = os.path.join(output_dir, ckpt_name)
 
             nlp.utils.save_parameters(model, params_saved)
-            logging.info('params saved in: %s', params_saved)
+            logger.info('params saved in: %s', params_saved)
             toc = time.time()
-            logging.info('Time cost=%.2fs', toc - tic)
+            logger.info('Time cost=%.2fs', toc - tic)
             tic = toc
 
     if not only_inference:
@@ -560,7 +563,7 @@ def train(metric):
         nlp.utils.load_parameters(model, params_saved)
         metric_str = 'Best model at epoch {}. Validation metrics:'.format(epoch_id)
         metric_str += ','.join([i + ':%.4f' for i in metric_nm])
-        logging.info(metric_str, *metric_val)
+        logger.info(metric_str, *metric_val)
 
     # inference on test data
     for segment, test_data in test_data_list:
@@ -568,7 +571,7 @@ def train(metric):
 
 def evaluate(loader_dev, metric, segment):
     """Evaluate the model on validation dataset."""
-    logging.info('Now we are doing evaluation on %s with %s.', segment, ctx)
+    logger.info('Now we are doing evaluation on %s with %s.', segment, ctx)
     metric.reset()
     step_loss = 0
     tic = time.time()
@@ -600,11 +603,11 @@ def evaluate(loader_dev, metric, segment):
     if not isinstance(metric_nm, list):
         metric_nm, metric_val = [metric_nm], [metric_val]
     metric_str = 'validation metrics:' + ','.join([i + ':%.4f' for i in metric_nm])
-    logging.info(metric_str, *metric_val)
+    logger.info(metric_str, *metric_val)
 
     mx.nd.waitall()
     toc = time.time()
-    logging.info('Time cost=%.2fs, throughput=%.2f samples/s', toc - tic,
+    logger.info('Time cost=%.2fs, throughput=%.2f samples/s', toc - tic,
                  dev_batch_size * len(loader_dev) / (toc - tic))
     return metric_nm, metric_val
 
