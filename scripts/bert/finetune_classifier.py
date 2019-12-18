@@ -39,6 +39,7 @@ import argparse
 import random
 import logging
 import warnings
+from datetime import datetime as dt
 import numpy as np
 import mxnet as mx
 from mxnet import gluon
@@ -68,6 +69,13 @@ tasks = {
     'LCQMC': LCQMCTask(),
     'ChnSentiCorp': ChnSentiCorpTask()
 }
+
+def output_dir_string(args):
+    model_name = args.bert_model
+    now = dt.now()
+    time_str = now.strftime('%Y-%m-%d_%H.%M.%S')
+    retval = f"logs/{time_str}_{model_name}"
+    return retval
 
 parser = argparse.ArgumentParser(
     description='BERT fine-tune examples for classification/regression tasks.',
@@ -160,7 +168,7 @@ parser.add_argument(
 parser.add_argument(
     '--output_dir',
     type=str,
-    default='./output_dir',
+    default=None,
     help='The output directory where the model params will be written.')
 parser.add_argument(
     '--only_inference',
@@ -180,11 +188,17 @@ parser.add_argument(
          'The provided value is the patience. ')
 
 args = parser.parse_args()
+output_dir = args.output_dir
+if output_dir is None:
+    output_dir = output_dir_string(args)
+nlp.utils.mkdir("logs")
+nlp.utils.mkdir(output_dir)
 
 logging.captureWarnings(True)
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
-                    level=logging.INFO)
+                    level=logging.INFO,
+                    handlers=[logging.FileHandler(f"{output_dir}/log.log"), logging.StreamHandler()])
 logger = logging.getLogger(__name__)
 logger.info(args)
 
@@ -273,7 +287,6 @@ if not model_parameters:
     model.classifier.initialize(init=initializer, ctx=ctx)
 
 # load checkpointing
-output_dir = args.output_dir
 if pretrained_bert_parameters:
     logger.info('loading bert params from %s', pretrained_bert_parameters)
     nlp.utils.load_parameters(model.bert, pretrained_bert_parameters, ctx=ctx,
@@ -281,7 +294,6 @@ if pretrained_bert_parameters:
 if model_parameters:
     logger.info('loading model params from %s', model_parameters)
     nlp.utils.load_parameters(model, model_parameters, ctx=ctx, cast_dtype=True)
-nlp.utils.mkdir(output_dir)
 
 logger.debug(model)
 #model.hybridize(static_alloc=True)
@@ -293,6 +305,7 @@ if use_roberta:
     bert_tokenizer = nlp.data.GPT2BPETokenizer()
 else:
     bert_tokenizer = BERTTokenizer(vocabulary, lower=do_lower_case)
+
 
 def preprocess_data(tokenizer, task, batch_size, dev_batch_size, max_len, vocab, pad=False):
     """Train/eval Data preparation function."""
