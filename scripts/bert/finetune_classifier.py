@@ -186,19 +186,25 @@ parser.add_argument(
     default=None,
     help='Whether to perform early stopping based on the metric on dev set. '
          'The provided value is the patience. ')
+parser.add_argument(
+    '--require_git_tag',
+    type=int,
+    default=1,
+    help='Disable the practice of committing a git tag before we start training. (Input 0 to avoid requiring a git tag.)')
 
 args = parser.parse_args()
+print(f"require_git_tag: {args.require_git_tag}")
 _datetime = git_tag.get_current_datetime()
 output_dir = args.output_dir
 if output_dir is None:
     output_dir = output_dir_string(args, _datetime)
 
 git_status = git_tag.check_git_status()
-if not git_status:
+if not git_status and args.require_git_tag:
     sys.exit(1)
 
 commit_err = git_tag.commit_git_tag(output_dir.split('/')[-1])
-if commit_err is not 0:
+if commit_err is not 0 and args.require_git_tag:
     sys.exit(commit_err)
 
 nlp.utils.mkdir("logs")
@@ -258,7 +264,7 @@ get_pretrained = not (pretrained_bert_parameters is not None
 
 downsample = [None]*24
 downsample[8] = 2
-downsample[16] = 2
+#downsample[16] = 2
 logging.info(f'downsample: {downsample}')
 
 use_roberta = 'roberta' in model_name

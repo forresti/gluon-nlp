@@ -495,6 +495,7 @@ class DotProductAttentionCell(AttentionCell):
         att_score = F.batch_dot(query, key, transpose_b=True)
         if mask is not None:
             att_score = _apply_mask(F, att_score, mask, self._dtype)
+            #print(f"att_score.shape: {att_score.shape}; mask.shape: {mask.shape}")
         return att_score
 
     def _compute_weight(self, F, query, key, mask=None):

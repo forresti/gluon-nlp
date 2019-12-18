@@ -241,13 +241,16 @@ class TransformerEncoderCell(HybridBlock):
             - additional_outputs of all the transformer encoder cell
         """
         outputs, attention_weights = self.attention_cell(inputs, inputs, inputs, mask)
+        #print(f"attention output.shape: {outputs.shape}")
         outputs = self.proj(outputs)
+        #print(f"proj output.shape: {outputs.shape}")
         if self._dropout:
             outputs = self.dropout_layer(outputs)
         if self._use_residual:
             outputs = outputs + inputs
         outputs = self.layer_norm(outputs)
         outputs = self.ffn(outputs)
+        #print(f"ffn output.shape: {outputs.shape}")
         additional_outputs = []
         if self._output_attention:
             additional_outputs.append(attention_weights)

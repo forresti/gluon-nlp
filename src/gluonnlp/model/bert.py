@@ -23,6 +23,8 @@ __all__ = ['BERTModel', 'RoBERTaModel', 'BERTEncoder', 'BERTClassifier',
 
 import os
 import math
+import logging
+logger = logging.getLogger(__name__)
 
 import mxnet as mx
 from mxnet.gluon import HybridBlock, nn
@@ -223,16 +225,21 @@ class BERTEncoder(HybridBlock, Seq2SeqEncoder):
             if self._downsample is not None:
                 if self._downsample[index] is not None:
                     downsample_amt = self._downsample[index]
+                    assert downsample_amt == 2, "we only support downsampling of None or 2 right now"
                     assert len(outputs.shape) == 3
-                    old_seq_len = outputs.shape[1]
-                    new_seq_len = math.ceil(old_seq_len / downsample_amt)
-                    _units = outputs.shape[2]
-                    resizer = transforms.Resize(size=(new_seq_len, _units)) # using default setting, which is bilinear
-                    resizer(outputs)
+                    # old_seq_len = outputs.shape[1]
+                    # new_seq_len = math.ceil(old_seq_len / downsample_amt)
+                    # _units = outputs.shape[2]
+                    # resizer = transforms.Resize(size=(new_seq_len, _units)) # using default setting, which is bilinear
+                    # outputs = resizer(outputs)
+                    outputs = self.downsample_by_2(F, outputs)
+                    mask = self.downsample_by_2x2(F, mask)
 
                     if curr_valid_length is not None:
-                        curr_valid_length = F.ceil(curr_valid_length / downsample_amt)
+                        curr_valid_length = F.ceil(curr_valid_length / downsample_amt) # TODO: make this agree with the exact amount that we downsampled by in Pooling
 
+                    logging.info(f'curr_valid_length: {curr_valid_length}')
+                    logging.info(f'outputs.shape: {outputs.shape}')
 
             inputs = outputs
             if self._output_all_encodings:
@@ -254,6 +261,19 @@ class BERTEncoder(HybridBlock, Seq2SeqEncoder):
         return outputs, additional_outputs
 
 
+    def downsample_by_2(self, F, data):
+        assert len(data.shape) == 3, "we assume 3 dimensions, [batch, seq_len, units]"
+        data = data.expand_dims(1)  # [batch, seq_len, units] --> [batch, 1, seq_len, units]
+        data = F.Pooling(data=data, kernel=(3, 1), stride=(2, 1), pool_type='avg', pad=(1, 0))  # downsample seq_len by 2x
+        data = data.squeeze(1)  # [batch, 1, seq_len, units] --> [batch, seq_len, units]
+        return data
+
+    def downsample_by_2x2(self, F, data):
+        assert len(data.shape) == 3, "we assume 3 dimensions, [batch, seq_len, units]"
+        data = data.expand_dims(1)  # [batch, seq_len, units] --> [batch, 1, seq_len, units]
+        data = F.Pooling(data=data, kernel=(3,3), stride=(2, 2), pool_type='avg', pad=(1, 1))  # downsample both dimensions by 2x
+        data = data.squeeze(1)  # [batch, 1, seq_len, units] --> [batch, seq_len, units]
+        return data
 ###############################################################################
 #                                FULL MODEL                                   #
 ###############################################################################
