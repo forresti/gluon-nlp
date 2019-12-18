@@ -233,7 +233,7 @@ class BERTEncoder(HybridBlock, Seq2SeqEncoder):
                     # resizer = transforms.Resize(size=(new_seq_len, _units)) # using default setting, which is bilinear
                     # outputs = resizer(outputs)
                     outputs = self.downsample_by_2(F, outputs)
-                    mask = self.downsample_by_2x2(F, mask)
+                    mask = self.downsample_by_2x2(F, mask) # TODO: understand why this mask exists. It's used in attention_cell. It's different from the dimensions and use-case of the mask in pytorch.
 
                     if curr_valid_length is not None:
                         curr_valid_length = F.ceil(curr_valid_length / downsample_amt) # TODO: make this agree with the exact amount that we downsampled by in Pooling

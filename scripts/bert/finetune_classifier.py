@@ -74,7 +74,7 @@ tasks = {
 
 def output_dir_string(args,_datetime):
     model_name = args.bert_model
-    retval = f"logs/{_datetime}_{model_name}"
+    retval = f"logs/{_datetime}_{model_name}_{args.task_name}"
     return retval
 
 parser = argparse.ArgumentParser(
@@ -263,7 +263,7 @@ get_pretrained = not (pretrained_bert_parameters is not None
                       or model_parameters is not None)
 
 downsample = [None]*24
-downsample[8] = 2
+#downsample[8] = 2
 #downsample[16] = 2
 logging.info(f'downsample: {downsample}')
 
