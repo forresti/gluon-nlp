@@ -229,6 +229,10 @@ if only_inference and not model_parameters:
 get_pretrained = not (pretrained_bert_parameters is not None
                       or model_parameters is not None)
 
+downsample = [None]*24
+downsample[8] = 2
+downsample[16] = 2
+
 use_roberta = 'roberta' in model_name
 get_model_params = {
     'name' : model_name,
@@ -237,6 +241,7 @@ get_model_params = {
     'ctx' : ctx,
     'use_decoder' : False,
     'use_classifier' : False,
+    'downsample' : downsample
 }
 # RoBERTa does not contain parameters for sentence pair classification
 if not use_roberta:
@@ -276,7 +281,7 @@ if model_parameters:
 nlp.utils.mkdir(output_dir)
 
 logging.debug(model)
-model.hybridize(static_alloc=True)
+#model.hybridize(static_alloc=True)
 loss_function.hybridize(static_alloc=True)
 
 # data processing

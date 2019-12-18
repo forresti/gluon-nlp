@@ -22,10 +22,12 @@ __all__ = ['BERTModel', 'RoBERTaModel', 'BERTEncoder', 'BERTClassifier',
            'ernie_12_768_12', 'roberta_12_768_12', 'roberta_24_1024_16']
 
 import os
+import math
 
 import mxnet as mx
 from mxnet.gluon import HybridBlock, nn
 from mxnet.gluon.model_zoo import model_store
+from mxnet.gluon.data.vision import transforms
 
 from ..base import get_home_dir
 from .block import GELU
@@ -82,6 +84,8 @@ class BERTEncoder(HybridBlock, Seq2SeqEncoder):
         Activation methods in PositionwiseFFN
     layer_norm_eps : float, default 1e-12
         Epsilon for layer_norm
+    downsample: None or array of length(num_layers), where each element is a number (I think we'll need it to be an integer? not sure) or None.
+        Amount to downsample the seq_len after each TransformerEncoderCell
 
     Inputs:
         - **inputs** : input sequence of shape (batch_size, length, C_in)
@@ -101,7 +105,7 @@ class BERTEncoder(HybridBlock, Seq2SeqEncoder):
                  max_length=50, num_heads=4, scaled=True, dropout=0.0, use_residual=True,
                  output_attention=False, output_all_encodings=False, weight_initializer=None,
                  bias_initializer='zeros', prefix=None, params=None, activation='gelu',
-                 layer_norm_eps=1e-12):
+                 layer_norm_eps=1e-12, downsample=None):
         super().__init__(prefix=prefix, params=params)
         assert units % num_heads == 0,\
             'In BERTEncoder, The units should be divided exactly ' \
@@ -112,6 +116,7 @@ class BERTEncoder(HybridBlock, Seq2SeqEncoder):
         self._output_attention = output_attention
         self._output_all_encodings = output_all_encodings
         self._dropout = dropout
+        self._downsample = downsample
 
         with self.name_scope():
             if dropout:
@@ -129,6 +134,7 @@ class BERTEncoder(HybridBlock, Seq2SeqEncoder):
                     output_attention=output_attention, prefix='transformer%d_' % i,
                     activation=activation, layer_norm_eps=layer_norm_eps)
                 self.transformer_cells.add(cell)
+
 
     def __call__(self, inputs, states=None, valid_length=None): #pylint: disable=arguments-differ
         """Encode the inputs given the states and valid sequence length.
@@ -186,12 +192,14 @@ class BERTEncoder(HybridBlock, Seq2SeqEncoder):
                                       F.reshape(valid_length, shape=(-1, 1)))
             mask = F.broadcast_mul(F.expand_dims(mask, axis=1),
                                    F.broadcast_mul(ones, F.reshape(ones, shape=(-1, 1))))
+            curr_valid_length = valid_length
             if states is None:
                 states = [mask]
             else:
                 states.append(mask)
         else:
             mask = None
+            curr_valid_length = None
 
         if states is None:
             states = [steps]
@@ -209,22 +217,39 @@ class BERTEncoder(HybridBlock, Seq2SeqEncoder):
 
         all_encodings_outputs = []
         additional_outputs = []
-        for cell in self.transformer_cells:
+        for index, cell in enumerate(self.transformer_cells):
             outputs, attention_weights = cell(inputs, mask)
+
+            if self._downsample is not None:
+                if self._downsample[index] is not None:
+                    downsample_amt = self._downsample[index]
+                    assert len(outputs.shape) == 3
+                    old_seq_len = outputs.shape[1]
+                    new_seq_len = math.ceil(old_seq_len / downsample_amt)
+                    _units = outputs.shape[2]
+                    resizer = transforms.Resize(size=(new_seq_len, _units)) # using default setting, which is bilinear
+                    resizer(outputs)
+
+                    if curr_valid_length is not None:
+                        curr_valid_length = F.ceil(curr_valid_length / downsample_amt)
+
+
             inputs = outputs
             if self._output_all_encodings:
-                if valid_length is not None:
-                    outputs = F.SequenceMask(outputs, sequence_length=valid_length,
+                if curr_valid_length is not None:
+                    outputs = F.SequenceMask(outputs, sequence_length=curr_valid_length,
                                              use_sequence_length=True, axis=1)
                 all_encodings_outputs.append(outputs)
 
             if self._output_attention:
                 additional_outputs.append(attention_weights)
 
-        if valid_length is not None and not self._output_all_encodings:
+        if curr_valid_length is not None and not self._output_all_encodings:
             # if self._output_all_encodings, SequenceMask is already applied above
-            outputs = F.SequenceMask(outputs, sequence_length=valid_length,
+            outputs = F.SequenceMask(outputs, sequence_length=curr_valid_length,
                                      use_sequence_length=True, axis=1)
+
+        import pdb; pdb.set_trace()
 
         if self._output_all_encodings:
             return all_encodings_outputs, additional_outputs
@@ -815,7 +840,7 @@ bert_hparams = {
 
 def bert_12_768_12(dataset_name=None, vocab=None, pretrained=True, ctx=mx.cpu(),
                    root=os.path.join(get_home_dir(), 'models'), use_pooler=True, use_decoder=True,
-                   use_classifier=True, pretrained_allow_missing=False, **kwargs):
+                   use_classifier=True, pretrained_allow_missing=False, downsample=None, **kwargs):
     """Generic BERT BASE model.
 
     The number of layers (L) is 12, number of units (H) is 768, and the
@@ -905,13 +930,13 @@ def bert_12_768_12(dataset_name=None, vocab=None, pretrained=True, ctx=mx.cpu(),
     return get_bert_model(model_name='bert_12_768_12', vocab=vocab, dataset_name=dataset_name,
                           pretrained=pretrained, ctx=ctx, use_pooler=use_pooler,
                           use_decoder=use_decoder, use_classifier=use_classifier, root=root,
-                          pretrained_allow_missing=pretrained_allow_missing, **kwargs)
+                          pretrained_allow_missing=pretrained_allow_missing, downsample=downsample, **kwargs)
 
 
 def bert_24_1024_16(dataset_name=None, vocab=None, pretrained=True, ctx=mx.cpu(), use_pooler=True,
                     use_decoder=True, use_classifier=True,
                     root=os.path.join(get_home_dir(), 'models'),
-                    pretrained_allow_missing=False, **kwargs):
+                    pretrained_allow_missing=False, downsample=None, **kwargs):
     """Generic BERT LARGE model.
 
     The number of layers (L) is 24, number of units (H) is 1024, and the
@@ -960,12 +985,12 @@ def bert_24_1024_16(dataset_name=None, vocab=None, pretrained=True, ctx=mx.cpu()
     return get_bert_model(model_name='bert_24_1024_16', vocab=vocab, dataset_name=dataset_name,
                           pretrained=pretrained, ctx=ctx, use_pooler=use_pooler,
                           use_decoder=use_decoder, use_classifier=use_classifier, root=root,
-                          pretrained_allow_missing=pretrained_allow_missing, **kwargs)
+                          pretrained_allow_missing=pretrained_allow_missing, downsample=downsample, **kwargs)
 
 
 def roberta_12_768_12(dataset_name=None, vocab=None, pretrained=True, ctx=mx.cpu(),
                       use_decoder=True,
-                      root=os.path.join(get_home_dir(), 'models'), **kwargs):
+                      root=os.path.join(get_home_dir(), 'models'), downsample=None, **kwargs):
     """Generic RoBERTa BASE model.
 
     The number of layers (L) is 12, number of units (H) is 768, and the
@@ -997,12 +1022,12 @@ def roberta_12_768_12(dataset_name=None, vocab=None, pretrained=True, ctx=mx.cpu
     """
     return get_roberta_model(model_name='roberta_12_768_12', vocab=vocab, dataset_name=dataset_name,
                              pretrained=pretrained, ctx=ctx,
-                             use_decoder=use_decoder, root=root, **kwargs)
+                             use_decoder=use_decoder, root=root, downsample=downsample, **kwargs)
 
 
 def roberta_24_1024_16(dataset_name=None, vocab=None, pretrained=True, ctx=mx.cpu(),
                        use_decoder=True,
-                       root=os.path.join(get_home_dir(), 'models'), **kwargs):
+                       root=os.path.join(get_home_dir(), 'models'), downsample=None, **kwargs):
     """Generic RoBERTa LARGE model.
 
     The number of layers (L) is 24, number of units (H) is 1024, and the
@@ -1035,11 +1060,12 @@ def roberta_24_1024_16(dataset_name=None, vocab=None, pretrained=True, ctx=mx.cp
     return get_roberta_model(model_name='roberta_24_1024_16', vocab=vocab,
                              dataset_name=dataset_name, pretrained=pretrained, ctx=ctx,
                              use_decoder=use_decoder,
-                             root=root, **kwargs)
+                             root=root, downsample=downsample, **kwargs)
+
 
 def ernie_12_768_12(dataset_name=None, vocab=None, pretrained=True, ctx=mx.cpu(),
                     root=os.path.join(get_home_dir(), 'models'), use_pooler=True, use_decoder=True,
-                    use_classifier=True, **kwargs):
+                    use_classifier=True, downsample=None, **kwargs):
     """Baidu ERNIE model.
 
     Reference:
@@ -1081,13 +1107,13 @@ def ernie_12_768_12(dataset_name=None, vocab=None, pretrained=True, ctx=mx.cpu()
     return get_bert_model(model_name='ernie_12_768_12', vocab=vocab, dataset_name=dataset_name,
                           pretrained=pretrained, ctx=ctx, use_pooler=use_pooler,
                           use_decoder=use_decoder, use_classifier=use_classifier, root=root,
-                          pretrained_allow_missing=False, **kwargs)
+                          pretrained_allow_missing=False, downsample=downsample, **kwargs)
 
 
 def get_roberta_model(model_name=None, dataset_name=None, vocab=None, pretrained=True, ctx=mx.cpu(),
                       use_decoder=True, output_attention=False,
                       output_all_encodings=False, root=os.path.join(get_home_dir(), 'models'),
-                      **kwargs):
+                      downsample=None, **kwargs):
     """Any RoBERTa pretrained model.
 
     Parameters
@@ -1145,7 +1171,8 @@ def get_roberta_model(model_name=None, dataset_name=None, vocab=None, pretrained
                           output_all_encodings=output_all_encodings,
                           use_residual=predefined_args['use_residual'],
                           activation=predefined_args.get('activation', 'gelu'),
-                          layer_norm_eps=predefined_args.get('layer_norm_eps', 1e-5))
+                          layer_norm_eps=predefined_args.get('layer_norm_eps', 1e-5),
+                          downsample=downsample)
 
     from ..vocab import Vocab  # pylint: disable=import-outside-toplevel
     bert_vocab = _load_vocab(dataset_name, vocab, root, cls=Vocab)
@@ -1165,7 +1192,7 @@ def get_bert_model(model_name=None, dataset_name=None, vocab=None, pretrained=Tr
                    use_pooler=True, use_decoder=True, use_classifier=True, output_attention=False,
                    output_all_encodings=False, use_token_type_embed=True,
                    root=os.path.join(get_home_dir(), 'models'),
-                   pretrained_allow_missing=False, **kwargs):
+                   pretrained_allow_missing=False, downsample=None, **kwargs):
     """Any BERT pretrained model.
 
     Parameters
@@ -1252,7 +1279,8 @@ def get_bert_model(model_name=None, dataset_name=None, vocab=None, pretrained=Tr
                           output_all_encodings=output_all_encodings,
                           use_residual=predefined_args['use_residual'],
                           activation=predefined_args.get('activation', 'gelu'),
-                          layer_norm_eps=predefined_args.get('layer_norm_eps', 1e-12))
+                          layer_norm_eps=predefined_args.get('layer_norm_eps', 1e-12),
+                          downsample=downsample)
 
     from ..vocab import BERTVocab  # pylint: disable=import-outside-toplevel
     # bert_vocab
