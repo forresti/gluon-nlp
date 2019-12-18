@@ -238,8 +238,8 @@ class BERTEncoder(HybridBlock, Seq2SeqEncoder):
                     if curr_valid_length is not None:
                         curr_valid_length = F.ceil(curr_valid_length / downsample_amt) # TODO: make this agree with the exact amount that we downsampled by in Pooling
 
-                    logging.info(f'curr_valid_length: {curr_valid_length}')
-                    logging.info(f'outputs.shape: {outputs.shape}')
+                    #logging.info(f'curr_valid_length: {curr_valid_length}')
+                    #logging.info(f'outputs.shape: {outputs.shape}')
 
             inputs = outputs
             if self._output_all_encodings:
